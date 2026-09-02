@@ -11,6 +11,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import extractor
+import smart_pipeline
 
 
 class ExtractorApp(tk.Tk):
@@ -35,7 +36,7 @@ class ExtractorApp(tk.Tk):
         root.pack(fill="both", expand=True)
 
         ttk.Label(root, text="INTELLIGENT VIDEO PHOTO EXTRACTOR", font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        ttk.Label(root, text="Video → analyse frames → quality selection → duplicate removal → photos", font=("Segoe UI", 10)).pack(anchor="w", pady=(4, 18))
+        ttk.Label(root, text="Video → analyse frames → AI quality ranking → duplicate removal → photos", font=("Segoe UI", 10)).pack(anchor="w", pady=(4, 18))
 
         files = ttk.LabelFrame(root, text="Files", padding=14)
         files.pack(fill="x", pady=(0, 12))
@@ -122,7 +123,7 @@ class ExtractorApp(tk.Tk):
         self.start_button.configure(state="disabled")
         self.progress.start(10)
         self.status_var.set("Analysing video…")
-        self.log_message("Starting analysis…")
+        self.log_message("Starting intelligent analysis…")
 
         thread = threading.Thread(target=self._run, args=(video, output, sample, max_photos, threshold), daemon=True)
         thread.start()
@@ -137,9 +138,16 @@ class ExtractorApp(tk.Tk):
             work_dir = output / "_frames"
             selected_dir = output / "selected_photos"
             candidates = extractor.extract_candidates(video, work_dir, sample)
-            self.after(0, self.log_message, f"Analysed {len(candidates)} candidate frames.")
+            self.after(0, self.log_message, f"Extracted {len(candidates)} candidate frames.")
 
-            selected = extractor.select_best(candidates, work_dir, selected_dir, max_photos, threshold)
+            self.after(0, self.log_message, "Running visual intelligence: faces, sharpness and exposure…")
+            quality_results = smart_pipeline.analyse_candidates(candidates)
+            face_frames = sum(1 for result in quality_results.values() if result.face_count > 0)
+            self.after(0, self.log_message, f"Visual analysis complete. Faces detected in {face_frames}/{len(candidates)} frames.")
+
+            selected = smart_pipeline.select_smart(candidates, quality_results, max_photos, threshold)
+            smart_pipeline.copy_selected(selected, selected_dir)
+            smart_pipeline.write_smart_report(output, selected, quality_results)
             extractor.write_report(output, info, selected)
             self.after(0, self._finished, len(selected), selected_dir, output)
         except Exception as exc:
@@ -148,9 +156,9 @@ class ExtractorApp(tk.Tk):
     def _finished(self, count: int, selected_dir: Path, output: Path) -> None:
         self.progress.stop()
         self.start_button.configure(state="normal")
-        self.status_var.set(f"Complete — {count} photos selected")
+        self.status_var.set(f"Complete — {count} intelligent selections")
         self.log_message(f"Complete. Photos: {selected_dir}")
-        self.log_message(f"Reports: {output / 'report.json'} and {output / 'report.csv'}")
+        self.log_message(f"Reports: {output / 'report.json'}, {output / 'report.csv'} and {output / 'smart_report.json'}")
         messagebox.showinfo("Analysis complete", f"Selected {count} photos.\n\nOutput: {selected_dir}")
 
     def _failed(self, error: str) -> None:
