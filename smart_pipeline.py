@@ -9,6 +9,7 @@ length or file-size limit is imposed.
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import asdict
 from pathlib import Path
 
@@ -55,6 +56,14 @@ def select_smart(
             break
 
     return selected
+
+
+def copy_selected(selected: list[FrameResult], selected_dir: Path) -> None:
+    """Copy selected candidate images into the final output folder."""
+    selected_dir.mkdir(parents=True, exist_ok=True)
+    for index, candidate in enumerate(selected, start=1):
+        destination = selected_dir / f"photo_{index:04d}.jpg"
+        shutil.copy2(candidate.image, destination)
 
 
 def write_smart_report(
