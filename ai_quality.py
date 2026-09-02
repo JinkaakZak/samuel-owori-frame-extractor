@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Intelligent visual-quality scoring for extracted video frames.
 
-Uses OpenCV's built-in Haar cascades for face and eye detection and combines
-face size, face position, eye visibility, sharpness and exposure into a
-ranking score. Eye detection is a heuristic: it estimates visible eyes but
-is not a medical-grade or deep-learning eye-state classifier.
+Combines sharpness and exposure with face-based intelligence from
+``face_intelligence.py``: real eye-open/closed detection (Eye Aspect Ratio
+from facial landmarks, with a Haar-cascade fallback), head-pose/facing-camera
+scoring, face size, face position, and group-photo awareness (every face in
+the frame is scored, not just the largest).
 
 No artificial video length or file-size limit is imposed.
 """
@@ -16,22 +17,23 @@ from pathlib import Path
 
 import cv2
 
+from face_intelligence import FaceIntelligence, GroupResult
+
 
 @dataclass
 class QualityResult:
     face_count: int
     largest_face_ratio: float
     face_score: float
-    eye_count: int
+    eye_count: int  # eyes open on the best/largest face (0, 1, or 2)
     eye_visibility_score: float
     face_position_score: float
+    facing_camera_score: float
+    group_score: float  # rewards multiple people with eyes open, facing camera
     sharpness_score: float
     exposure_score: float
     total_score: float
-
-
-FACE_CASCADE = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-EYE_CASCADE = cv2.data.haarcascades + "haarcascade_eye.xml"
+    method: str  # "landmark" or "haar_fallback" -- which detector produced this
 
 
 def _exposure(gray) -> float:
@@ -39,86 +41,71 @@ def _exposure(gray) -> float:
     return max(0.0, 1.0 - abs(mean - 128.0) / 128.0)
 
 
-def _position_score(x: int, y: int, fw: int, fh: int, width: int, height: int) -> float:
-    """Score how naturally positioned the largest face is in the frame."""
-    face_cx = (x + fw / 2.0) / width
-    face_cy = (y + fh / 2.0) / height
-    dx = face_cx - 0.5
-    dy = face_cy - 0.5
-    distance = (dx * dx + dy * dy) ** 0.5
-    return max(0.0, 1.0 - distance / 0.7072)
+def _sharpness_score(gray) -> float:
+    sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    return min(1.0, sharpness / 500.0)
 
 
-def analyse_image(path: Path) -> QualityResult:
+def analyse_with(fi: FaceIntelligence, path: Path) -> QualityResult:
+    """Analyse one image using an already-loaded FaceIntelligence instance.
+    Prefer this over ``analyse_image`` when processing many frames, since it
+    avoids reloading the face model/cascades on every single call."""
     image = cv2.imread(str(path))
     if image is None:
         raise ValueError(f"Could not read image: {path}")
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    h, w = gray.shape[:2]
-
-    face_detector = cv2.CascadeClassifier(FACE_CASCADE)
-    eye_detector = cv2.CascadeClassifier(EYE_CASCADE)
-
-    faces = face_detector.detectMultiScale(
-        gray,
-        scaleFactor=1.1,
-        minNeighbors=5,
-        minSize=(40, 40),
-    )
-
-    largest_ratio = 0.0
-    largest_face = None
-    for face in faces:
-        x, y, fw, fh = face
-        ratio = (fw * fh) / float(w * h)
-        if ratio > largest_ratio:
-            largest_ratio = ratio
-            largest_face = face
-
-    face_score = min(1.0, largest_ratio * 8.0) if len(faces) else 0.0
-
-    eye_count = 0
-    eye_visibility_score = 0.0
-    face_position_score = 0.0
-
-    if largest_face is not None:
-        x, y, fw, fh = largest_face
-        face_position_score = _position_score(x, y, fw, fh, w, h)
-
-        roi = gray[y:y + fh, x:x + fw]
-        eyes = eye_detector.detectMultiScale(
-            roi,
-            scaleFactor=1.1,
-            minNeighbors=6,
-            minSize=(max(10, fw // 12), max(10, fh // 12)),
-        )
-        eye_count = min(2, len(eyes))
-        eye_visibility_score = {0: 0.0, 1: 0.55, 2: 1.0}[eye_count]
-
-    sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-    sharpness_score = min(1.0, sharpness / 500.0)
+    sharpness_score = _sharpness_score(gray)
     exposure_score = _exposure(gray)
 
-    if len(faces):
+    group: GroupResult = fi.analyse(path)
+    best = group.best_face
+
+    if best is not None:
         total = (
-            0.40 * face_score
-            + 0.22 * sharpness_score
-            + 0.13 * exposure_score
-            + 0.15 * eye_visibility_score
-            + 0.10 * face_position_score
+            0.35 * min(1.0, best.area_ratio * 8.0)
+            + 0.20 * sharpness_score
+            + 0.10 * exposure_score
+            + 0.20 * (best.eyes_open_count / 2.0)
+            + 0.10 * best.facing_camera_score
+            + 0.05 * best.position_score
+        )
+        result = QualityResult(
+            face_count=group.face_count,
+            largest_face_ratio=best.area_ratio,
+            face_score=min(1.0, best.area_ratio * 8.0),
+            eye_count=best.eyes_open_count,
+            eye_visibility_score=best.eyes_open_count / 2.0,
+            face_position_score=best.position_score,
+            facing_camera_score=best.facing_camera_score,
+            group_score=group.group_score,
+            sharpness_score=sharpness_score,
+            exposure_score=exposure_score,
+            total_score=total,
+            method=group.method,
         )
     else:
         total = 0.15 * sharpness_score + 0.85 * exposure_score
+        result = QualityResult(
+            face_count=0,
+            largest_face_ratio=0.0,
+            face_score=0.0,
+            eye_count=0,
+            eye_visibility_score=0.0,
+            face_position_score=0.0,
+            facing_camera_score=0.0,
+            group_score=0.0,
+            sharpness_score=sharpness_score,
+            exposure_score=exposure_score,
+            total_score=total,
+            method=group.method,
+        )
+    return result
 
-    return QualityResult(
-        face_count=len(faces),
-        largest_face_ratio=largest_ratio,
-        face_score=face_score,
-        eye_count=eye_count,
-        eye_visibility_score=eye_visibility_score,
-        face_position_score=face_position_score,
-        sharpness_score=sharpness_score,
-        exposure_score=exposure_score,
-        total_score=total,
-    )
+
+def analyse_image(path: Path) -> QualityResult:
+    """Standalone convenience wrapper -- loads its own FaceIntelligence
+    instance. For batch processing many frames, use ``analyse_with`` with a
+    single shared instance instead (much faster)."""
+    fi = FaceIntelligence()
+    return analyse_with(fi, path)

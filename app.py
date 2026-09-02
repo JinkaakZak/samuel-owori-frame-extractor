@@ -146,14 +146,17 @@ class ExtractorApp(tk.Tk):
             candidates = extractor.extract_candidates(video, work_dir, sample)
             self.after(0, self.log_message, f"Extracted {len(candidates)} candidate frames.")
 
-            self.after(0, self.log_message, "Running intelligence: faces, eye visibility, face position, sharpness and exposure…")
-            quality_results = smart_pipeline.analyse_candidates(candidates)
+            self.after(0, self.log_message, "Running intelligence: faces, eye state, head pose, sharpness and exposure…")
+            quality_results = smart_pipeline.analyse_candidates(candidates, work_dir)
+            method = next(iter(quality_results.values())).method if quality_results else "n/a"
             face_frames = sum(1 for result in quality_results.values() if result.face_count > 0)
             two_eye_frames = sum(1 for result in quality_results.values() if result.eye_count >= 2)
-            self.after(0, self.log_message, f"Intelligence complete. Faces: {face_frames}/{len(candidates)} | 2-eye visibility: {two_eye_frames}/{len(candidates)}")
+            group_frames = sum(1 for result in quality_results.values() if result.face_count > 1)
+            self.after(0, self.log_message, f"Detector: {method}")
+            self.after(0, self.log_message, f"Intelligence complete. Faces: {face_frames}/{len(candidates)} | 2-eye visibility: {two_eye_frames}/{len(candidates)} | Group shots: {group_frames}/{len(candidates)}")
 
-            selected = smart_pipeline.select_smart(candidates, quality_results, max_photos, threshold)
-            smart_pipeline.copy_selected(selected, selected_dir)
+            selected = smart_pipeline.select_smart(candidates, quality_results, work_dir, max_photos, threshold)
+            smart_pipeline.copy_selected(selected, work_dir, selected_dir)
             smart_pipeline.write_smart_report(output, selected, quality_results)
             extractor.write_report(output, info, selected)
             self.after(0, self._finished, len(selected), selected_dir, output)
