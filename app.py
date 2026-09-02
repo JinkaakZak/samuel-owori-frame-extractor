@@ -12,6 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import extractor
 import smart_pipeline
+from photo_review import PhotoReview
 
 
 class ExtractorApp(tk.Tk):
@@ -20,6 +21,7 @@ class ExtractorApp(tk.Tk):
         self.title("Intelligent Video Photo Extractor")
         self.geometry("820x620")
         self.minsize(760, 560)
+        self.review_dir: Path | None = None
 
         self.video_var = tk.StringVar()
         self.output_var = tk.StringVar(value=str(Path.cwd() / "output"))
@@ -36,7 +38,7 @@ class ExtractorApp(tk.Tk):
         root.pack(fill="both", expand=True)
 
         ttk.Label(root, text="INTELLIGENT VIDEO PHOTO EXTRACTOR", font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        ttk.Label(root, text="Video → analyse frames → AI quality ranking → duplicate removal → photos", font=("Segoe UI", 10)).pack(anchor="w", pady=(4, 18))
+        ttk.Label(root, text="Video → analyse frames → AI quality ranking → duplicate removal → review", font=("Segoe UI", 10)).pack(anchor="w", pady=(4, 18))
 
         files = ttk.LabelFrame(root, text="Files", padding=14)
         files.pack(fill="x", pady=(0, 12))
@@ -69,7 +71,9 @@ class ExtractorApp(tk.Tk):
         actions.pack(fill="x", pady=(0, 12))
         self.start_button = ttk.Button(actions, text="START ANALYSIS", command=self.start)
         self.start_button.pack(side="left")
-        ttk.Button(actions, text="Open Output", command=self.open_output).pack(side="left", padx=8)
+        self.review_button = ttk.Button(actions, text="REVIEW PHOTOS", command=self.review_photos, state="disabled")
+        self.review_button.pack(side="left", padx=8)
+        ttk.Button(actions, text="Open Output", command=self.open_output).pack(side="left")
 
         self.progress = ttk.Progressbar(root, variable=self.progress_var, maximum=100, mode="indeterminate")
         self.progress.pack(fill="x", pady=(5, 8))
@@ -120,6 +124,8 @@ class ExtractorApp(tk.Tk):
             messagebox.showerror("Video not found", "Please select a valid video file.")
             return
 
+        self.review_dir = None
+        self.review_button.configure(state="disabled")
         self.start_button.configure(state="disabled")
         self.progress.start(10)
         self.status_var.set("Analysing video…")
@@ -156,10 +162,18 @@ class ExtractorApp(tk.Tk):
     def _finished(self, count: int, selected_dir: Path, output: Path) -> None:
         self.progress.stop()
         self.start_button.configure(state="normal")
-        self.status_var.set(f"Complete — {count} intelligent selections")
-        self.log_message(f"Complete. Photos: {selected_dir}")
+        self.review_dir = selected_dir
+        self.review_button.configure(state="normal")
+        self.status_var.set(f"Complete — {count} intelligent selections ready for review")
+        self.log_message(f"Complete. AI-selected photos: {selected_dir}")
         self.log_message(f"Reports: {output / 'report.json'}, {output / 'report.csv'} and {output / 'smart_report.json'}")
-        messagebox.showinfo("Analysis complete", f"Selected {count} photos.\n\nOutput: {selected_dir}")
+        messagebox.showinfo("Analysis complete", f"Selected {count} photos.\n\nClick REVIEW PHOTOS to approve or reject them.")
+
+    def review_photos(self) -> None:
+        if self.review_dir and self.review_dir.exists():
+            PhotoReview(self, self.review_dir)
+        else:
+            messagebox.showwarning("No photos", "Run an analysis first.")
 
     def _failed(self, error: str) -> None:
         self.progress.stop()
