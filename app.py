@@ -38,7 +38,7 @@ class ExtractorApp(tk.Tk):
         root.pack(fill="both", expand=True)
 
         ttk.Label(root, text="INTELLIGENT VIDEO PHOTO EXTRACTOR", font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        ttk.Label(root, text="Video → analyse frames → AI quality ranking → duplicate removal → review", font=("Segoe UI", 10)).pack(anchor="w", pady=(4, 18))
+        ttk.Label(root, text="Video → analyse frames → intelligent quality ranking → duplicate removal → review", font=("Segoe UI", 10)).pack(anchor="w", pady=(4, 18))
 
         files = ttk.LabelFrame(root, text="Files", padding=14)
         files.pack(fill="x", pady=(0, 12))
@@ -146,10 +146,11 @@ class ExtractorApp(tk.Tk):
             candidates = extractor.extract_candidates(video, work_dir, sample)
             self.after(0, self.log_message, f"Extracted {len(candidates)} candidate frames.")
 
-            self.after(0, self.log_message, "Running visual intelligence: faces, sharpness and exposure…")
+            self.after(0, self.log_message, "Running intelligence: faces, eye visibility, face position, sharpness and exposure…")
             quality_results = smart_pipeline.analyse_candidates(candidates)
             face_frames = sum(1 for result in quality_results.values() if result.face_count > 0)
-            self.after(0, self.log_message, f"Visual analysis complete. Faces detected in {face_frames}/{len(candidates)} frames.")
+            two_eye_frames = sum(1 for result in quality_results.values() if result.eye_count >= 2)
+            self.after(0, self.log_message, f"Intelligence complete. Faces: {face_frames}/{len(candidates)} | 2-eye visibility: {two_eye_frames}/{len(candidates)}")
 
             selected = smart_pipeline.select_smart(candidates, quality_results, max_photos, threshold)
             smart_pipeline.copy_selected(selected, selected_dir)
